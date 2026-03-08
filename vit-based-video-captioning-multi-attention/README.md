@@ -1,17 +1,17 @@
-# Transformer-based Soccer Video Captioning
+# Transformer-Based Soccer Video Captioning
 
 ## Overview
 
-This project implements a **Transformer-based video captioning system for soccer events** using the **SoccerNet-Caption dataset**.
+This project implements a Transformer-based soccer video captioning system using the SoccerNet-Caption dataset. The system generates natural language descriptions for short soccer event clips by combining visual features extracted from video frames with a Transformer decoder that generates captions autoregressively.
 
-The system generates natural language descriptions for short soccer event clips by combining:
+Each event clip is represented as 16 sampled frames. A pretrained Vision Transformer (ViT) extracts a 768-dimensional embedding per frame, which serves as the visual memory for the caption generation model.
 
-- **Vision Transformer (ViT)** for frame-level visual feature extraction
-- **Transformer Decoder** for autoregressive caption generation
+The caption generator is a 6-layer, 8-head Transformer decoder that uses:
 
-Each event clip is represented as **16 sampled frames**, which are encoded into embeddings using a pretrained Vision Transformer. These embeddings serve as **visual memory** for a Transformer decoder that generates captions describing the event.
+- Masked self-attention for language modeling
+- Cross-attention to align words with visual frame features
 
-The model extends the baseline architecture with **multi-head attention, temporal frame positional embeddings, beam search decoding, and a custom multi-component loss function**, significantly improving caption quality.
+Several improvements were introduced beyond the baseline model, including multi-head attention, temporal positional embeddings, beam search decoding, and a custom multi-component loss function. These changes significantly improved caption quality.
 
 ---
 
@@ -21,9 +21,9 @@ The model extends the baseline architecture with **multi-head attention, tempora
 
 - 36,894 temporally anchored captions
 - 471 broadcast soccer matches
-- ~716 hours of video content
+- Approximately 716 hours of video
 
-Each caption corresponds to a **5–10 second event clip** and contains:
+Each caption describes a 5 to 10 second event clip and includes:
 
 - Match ID
 - Timestamp
@@ -36,29 +36,23 @@ Each caption corresponds to a **5–10 second event clip** and contains:
 
 For each event clip:
 
-1. **16 evenly spaced frames** are sampled from the video.
-2. Frames are resized to **224 × 224**.
-3. Each frame is passed through:
+1. 16 evenly spaced frames are sampled from the event window.
+2. Frames are resized to 224 × 224.
+3. Each frame is passed through the pretrained model:
 
+`google/vit-base-patch16-224`
 
-google/vit-base-patch16-224
+4. The CLS token embedding is extracted.
 
-
-4. The **CLS token embedding** is extracted.
-
-Output per frame:
-
+Each frame produces a:
 
 768-dimensional feature vector
 
+Final representation for an event clip:
 
-Final representation for a clip:
+(16, 768) tensor
 
-
-(16, 768) feature tensor
-
-
-These features are **precomputed and stored**, avoiding end-to-end vision training.
+These visual features are precomputed and stored on disk so that the vision encoder does not need to be trained end-to-end.
 
 ---
 
@@ -66,7 +60,7 @@ These features are **precomputed and stored**, avoiding end-to-end vision traini
 
 ## Caption Cleaning
 
-Text preprocessing steps include:
+Text preprocessing includes:
 
 - Removing punctuation
 - Converting text to lowercase
@@ -77,69 +71,83 @@ Text preprocessing steps include:
 
 ## Vocabulary Construction
 
-Vocabulary is built **only from the training set**.
+Vocabulary is built using only the training split.
 
 Steps:
 
 1. Count word frequencies
-2. Keep words with **frequency ≥ 2**
+2. Keep words with frequency ≥ 2
 
 Special tokens added:
 
-<PAD> <SOS> <EOS> <UNK> ```
+```
+<PAD>
+<SOS>
+<EOS>
+<UNK>
+```
 
 Final vocabulary size:
 
-~1,130 words
+Approximately 1,130 words.
 
 Mappings created:
 
-word_to_idx
+- `word_to_idx`
+- `idx_to_word`
 
-idx_to_word
+---
 
-Tokenization
+## Tokenization
 
 Each caption is processed as follows:
 
-Tokenize words
-
-Replace unseen words with <UNK>
-
-Add <SOS> at the beginning
-
-Add <EOS> at the end
-
-Pad or truncate to maximum length = 30
+1. Tokenize caption into words
+2. Replace unseen words with `<UNK>`
+3. Add `<SOS>` at the start
+4. Add `<EOS>` at the end
+5. Pad or truncate to maximum length = 30
 
 Final caption tensor shape:
 
 (30)
 
-Training setup:
+Training uses next-token prediction:
 
-Input to decoder: tokens[:, :-1]
-Target tokens:   tokens[:, 1:]
+Input to decoder:
 
-This enables next-token prediction training.
+tokens[:, :-1]
 
-Dataset and DataLoader
+Target tokens:
+
+tokens[:, 1:]
+
+This setup allows the model to learn autoregressive caption generation.
+
+---
+
+# Dataset and DataLoader
 
 Each training batch returns:
 
-video_features : (B, 16, 768)
+video_features : (B, 16, 768)  
 caption_tokens : (B, 30)
 
 Both are stored as PyTorch tensors.
 
-Model Architecture
-Architecture Type
+---
 
-Decoder-only Transformer with cross-attention to visual memory
+# Model Architecture
 
-Feature Projection
+## Architecture Type
 
-Original video features:
+Decoder-only Transformer with cross-attention to visual memory.
+
+---
+
+## Feature Projection
+
+Original video feature tensor:
 
 (16, 768)
 
@@ -147,59 +155,67 @@ Projected using a linear layer:
 
 768 → 512
 
-New representation:
+Resulting representation:
 
 (16, 512)
-Frame Positional Encoding
+
+---
+
+## Frame Positional Encoding
 
 A learnable positional embedding is added to represent the temporal order of the 16 frames.
 
-This allows the model to understand event progression.
+This gives the model awareness of event progression.
 
-Token Embedding
+---
 
-Each token index is converted into:
+## Token Embedding
 
-512-dimensional embedding
+Each token index is mapped to a 512-dimensional embedding vector.
 
-Token positional embeddings are added to encode sequence order.
+Token positional embeddings are added to represent sequence order.
 
-Final token tensor:
+Final token tensor shape:
 
 (30, 512)
-Decoder Masking
+
+---
+
+## Decoder Masking
 
 A causal mask ensures:
 
-token_t cannot attend to tokens > t
+token_t cannot attend to tokens after t
 
-This enforces autoregressive generation.
+This enforces autoregressive caption generation.
 
-Transformer Decoder
+---
+
+## Transformer Decoder
 
 Configuration:
 
-Layers: 6
-Attention Heads: 8
-Model Dimension: 512
+- 6 decoder layers
+- 8 attention heads
+- d_model = 512
 
-Each layer contains:
+Each decoder layer performs:
 
-Masked self-attention (language modeling)
-
-Cross-attention to video frame embeddings
-
-Feedforward network
+1. Masked self-attention over tokens
+2. Cross-attention to video frame embeddings
+3. Feedforward network
 
 Cross-attention allows the model to align generated words with visual features from frames.
 
-Output Projection
+---
 
-Decoder outputs:
+## Output Projection
+
+Decoder output:
 
 (30, 512)
 
-Final linear layer:
+Final projection layer:
 
 512 → vocab_size
 
@@ -207,56 +223,46 @@ Produces logits:
 
 (30, vocab_size)
 
-Softmax is applied internally during cross-entropy loss computation.
+Softmax is applied internally when computing cross-entropy loss.
 
-Loss Function
+---
+
+# Loss Function
 
 The model uses a multi-component loss:
 
 Total Loss = CE + 0.1 * Rep + 0.1 * Cov − 0.05 * Div
-1. Cross Entropy Loss
+
+### Cross Entropy Loss
 
 Standard next-token prediction loss.
 
-Ignores <PAD> tokens
+- Ignores `<PAD>` tokens
+- Ensures grammatical correctness
 
-Drives grammatical correctness
+### Repetition Penalty
 
-2. Repetition Penalty
+Measures similarity between token distributions across nearby timesteps.
 
-Measures similarity between predicted token distributions across nearby timesteps.
+High similarity is penalized to reduce repeated phrases and prevent mode collapse.
 
-High similarity is penalized.
+### Coverage Loss
 
-Goal:
+Aggregates attention across frames.
 
-Reduce repeated phrases
+If some frames receive very little attention, a penalty is applied.  
+This encourages the model to use information from the entire clip.
 
-Avoid mode collapse
-
-3. Coverage Loss
-
-Aggregates attention across all frames.
-
-If certain frames receive low cumulative attention, a penalty is applied.
-
-Goal:
-
-Encourage the model to use information from the entire video clip
-
-4. Diversity Loss
+### Diversity Loss
 
 Computes cosine similarity between attention heads.
 
-If heads focus on identical patterns:
+If multiple heads attend to the same patterns, a penalty is applied.  
+This encourages attention head specialization.
 
-Apply penalty
+---
 
-Goal:
-
-Encourage attention head specialization
-
-Training Strategy
+# Training Strategy
 
 Optimizer:
 
@@ -272,117 +278,106 @@ Linear warmup
 
 Regularization:
 
-Dropout = 0.1
-Weight Decay = 0.01
+- Dropout = 0.1
+- Weight decay = 0.01
 
-Stability Techniques:
+Stability techniques:
 
-Gradient clipping
+- Gradient clipping
+- Mixed precision training using autocast and GradScaler
 
-Mixed precision training (autocast + GradScaler)
+Memory optimization:
 
-Memory Optimization:
+- Gradient accumulation
 
-Gradient accumulation
+Early stopping is based on validation BLEU score.
 
-Early Stopping:
+The best model checkpoint is saved automatically.
 
-Based on validation BLEU score
+---
 
-Best model checkpoint is saved automatically.
-
-Inference
+# Inference
 
 Two decoding strategies are used.
 
-Greedy Decoding
+## Greedy Decoding
 
-Used during validation for speed.
+Used during validation for faster evaluation.
 
-Beam Search Decoding
+## Beam Search
 
 Used during final evaluation.
 
-Configuration:
-
 Beam size = 3
 
-Includes repetition penalty to prevent repeating the last 3 tokens.
+A repetition penalty is applied during beam search to prevent repeating the last few tokens.
 
-Baseline Limitations
+---
 
-Initial baseline model had several issues:
+# Baseline Limitations
 
-Single attention head → mode collapse
+The initial baseline model had several issues:
 
-No temporal encoding
+- Only 1 attention head leading to mode collapse
+- No temporal positional encoding
+- High dropout (0.4) causing underfitting
+- Greedy decoding only
+- Only 5 training epochs
+- Limited vocabulary (961 words)
 
-High dropout (0.4) → underfitting
+---
 
-Greedy decoding only
+# Improvements Introduced
 
-Only 5 training epochs
+Eight improvements were implemented:
 
-Limited vocabulary (961 words)
+1. Increased attention heads from 1 to 8
+2. Increased decoder layers from 4 to 6
+3. Added learnable temporal positional encoding
+4. Reduced dropout from 0.4 to 0.1
+5. Expanded vocabulary from 961 to 1,130 words
+6. Added beam search decoding
+7. Introduced custom multi-component loss
+8. Increased training from 5 to 50 epochs with early stopping
 
-Improvements Introduced
+Best validation performance occurred at epoch 12.
 
-Eight major improvements were implemented:
+---
 
-Increased attention heads 1 → 8 (removed mode collapse)
+# Evaluation Metrics
 
-Increased decoder depth 4 → 6 layers
+The model is evaluated using:
 
-Added learnable temporal positional encoding
-
-Reduced dropout 0.4 → 0.1
-
-Expanded vocabulary 961 → 1,130 words
-
-Implemented beam search decoding
-
-Introduced custom multi-component loss
-
-Extended training 5 → 50 epochs with early stopping
-
-Best validation performance was reached at epoch 12.
-
-Evaluation Metrics
-
-Model performance was evaluated using:
-
-BLEU-4
-
-METEOR
-
-ROUGE-L
-
-CIDEr
-
-Perplexity
+- BLEU-4
+- METEOR
+- ROUGE-L
+- CIDEr
+- Perplexity
 
 Perplexity is computed as:
 
 exp(total_cross_entropy / total_valid_tokens)
-Results
 
-Performance improvements compared to baseline:
+---
 
-Metric	Baseline	Final Model
-BLEU-4	0.0202	0.0468
-METEOR	+66.9%	
-Perplexity	64.4	4.0
+# Results
+
+Performance improvements compared to the baseline:
+
+| Metric | Baseline | Final Model |
+|------|------|------|
+| BLEU-4 | 0.0202 | 0.0468 |
+| METEOR | - | +66.9% |
+| Perplexity | 64.4 | 4.0 |
 
 Additional observations:
 
-73.2% of samples improved
-
-Gain/Loss ratio: 7.41×
+- 73.2% of samples improved
+- Gain/Loss ratio: 7.41x
 
 Largest improvements occurred in:
 
-Cross events (+0.050)
+- Cross events (+0.050 BLEU)
+- Corner events (+0.043 BLEU)
 
-Corner events (+0.043)
-
-The final model produces more diverse, temporally grounded captions with significantly better linguistic quality.
+The final model produces more diverse, temporally grounded captions with significantly improved linguistic quality.
